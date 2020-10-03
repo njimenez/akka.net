@@ -1,7 +1,7 @@
-//-----------------------------------------------------------------------
+﻿//-----------------------------------------------------------------------
 // <copyright file="Iterator.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -10,7 +10,7 @@ using System.Linq;
 
 namespace Akka.Util.Internal.Collections
 {
-    public class Iterator<T>
+    internal sealed class Iterator<T>
     {
         private readonly IList<T> _enumerator;
         private int _index;
@@ -24,7 +24,7 @@ namespace Akka.Util.Internal.Collections
         {
             return _index != _enumerator.Count 
                 ? _enumerator[_index++] 
-                : default(T);
+                : default;
         }
 
         public bool IsEmpty()

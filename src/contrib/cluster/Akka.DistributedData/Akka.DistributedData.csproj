@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="..\..\..\common.props" />
+
+  <PropertyGroup>
+    <AssemblyTitle>Akka.DistributedData</AssemblyTitle>
+    <Description>Replicated data using CRDT structures</Description>
+    <TargetFrameworks>$(NetStandardLibVersion)</TargetFrameworks>
+    <PackageTags>$(AkkaPackageTags);network;cluster;crdt;replication</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="reference.conf" />
+    <ProjectReference Include="..\..\..\core\Akka.Cluster\Akka.Cluster.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup Condition=" '$(TargetFramework)' == '$(NetStandardLibVersion)' ">
+    <DefineConstants>$(DefineConstants);CORECLR</DefineConstants>
+  </PropertyGroup>
+
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DefineConstants>$(DefineConstants);RELEASE</DefineConstants>
+  </PropertyGroup>
+
+</Project>

@@ -1,12 +1,13 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="CommandLine.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
 using System;
 using System.Collections.Specialized;
+using Akka.Configuration;
 
 namespace Akka.Remote.TestKit
 {   
@@ -26,14 +27,22 @@ namespace Akka.Remote.TestKit
     /// </summary>
     public class CommandLine
     {
-        private readonly static Lazy<StringDictionary> Values = new Lazy<StringDictionary>(() =>
+        private static readonly Lazy<StringDictionary> Values = new Lazy<StringDictionary>(() =>
         {
             var dictionary = new StringDictionary();
             foreach (var arg in Environment.GetCommandLineArgs())
             {
                 if (!arg.StartsWith("-D")) continue;
                 var tokens = arg.Substring(2).Split('=');
-                dictionary.Add(tokens[0], tokens[1]);
+
+                if (tokens.Length == 2)
+                {
+                    dictionary.Add(tokens[0], tokens[1]);
+                }
+                else
+                {
+                    throw new ConfigurationException($"Command line parameter '{arg}' should follow the pattern [-Dmultinode.<key>=<value>].");
+                }
             }
             return dictionary;
         });
@@ -43,9 +52,19 @@ namespace Akka.Remote.TestKit
             return Values.Value[key];
         }
 
+        public static string GetPropertyOrDefault(string key, string defaultStr)
+        {
+            return Values.Value.ContainsKey(key) ? Values.Value[key] : defaultStr;
+        }
+
         public static int GetInt32(string key)
         {
             return Convert.ToInt32(GetProperty(key));
+        }
+
+        public static int GetInt32OrDefault(string key, int defaultInt)
+        {
+            return Values.Value.ContainsKey(key) ? GetInt32(key) : defaultInt;
         }
     }
 }

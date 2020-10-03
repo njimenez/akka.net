@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="DequeWrapperMessageQueue.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -17,16 +17,22 @@ namespace Akka.Dispatch.MessageQueues
     /// </summary>
     public class DequeWrapperMessageQueue : IMessageQueue, IDequeBasedMessageQueueSemantics
     {
+        // doesn't need to be threadsafe - only called from within actor
         private readonly Stack<Envelope> _prependBuffer = new Stack<Envelope>();
-        private readonly IMessageQueue _messageQueue;
+
         /// <summary>
-        /// Takes another <see cref="MessageQueue"/> as an argument - wraps <see cref="messageQueue"/>
+        /// The underlying <see cref="IMessageQueue"/>.
+        /// </summary>
+        protected readonly IMessageQueue MessageQueue;
+
+        /// <summary>
+        /// Takes another <see cref="IMessageQueue"/> as an argument - wraps <paramref name="messageQueue"/>
         /// in order to provide it with prepend (<see cref="EnqueueFirst"/>) semantics.
         /// </summary>
-        /// <param name="messageQueue"></param>
+        /// <param name="messageQueue">The underlying message queue wrapped by this one.</param>
         public DequeWrapperMessageQueue(IMessageQueue messageQueue)
         {
-            _messageQueue = messageQueue;
+            MessageQueue = messageQueue;
         }
 
         /// <summary>
@@ -43,23 +49,20 @@ namespace Akka.Dispatch.MessageQueues
         /// </summary>
         public int Count
         {
-            get { return _messageQueue.Count + _prependBuffer.Count; }
+            get { return MessageQueue.Count + _prependBuffer.Count; }
         }
 
-        /// <summary>
-        /// Enqueue a message to the back of the <see cref="MessageQueue"/>
-        /// </summary>
-        /// <param name="envelope"></param>
-        public void Enqueue(Envelope envelope)
+        /// <inheritdoc cref="IMessageQueue"/>
+        public void Enqueue(IActorRef receiver, Envelope envelope)
         {
-            _messageQueue.Enqueue(envelope);
+            MessageQueue.Enqueue(receiver, envelope);
         }
 
         /// <summary>
         /// Attempt to dequeue a message from the front of the prepend buffer.
         /// 
         /// If the prepend buffer is empty, dequeue a message from the normal
-        /// <see cref="MessageQueue"/> wrapped but this wrapper.
+        /// <see cref="IMessageQueue"/> wrapped but this wrapper.
         /// </summary>
         /// <param name="envelope">The message to return, if any</param>
         /// <returns><c>true</c> if a message was available, <c>false</c> otherwise.</returns>
@@ -71,7 +74,17 @@ namespace Akka.Dispatch.MessageQueues
                 return true;
             }
 
-            return _messageQueue.TryDequeue(out envelope);
+            return MessageQueue.TryDequeue(out envelope);
+        }
+
+        /// <inheritdoc cref="IMessageQueue"/>
+        public void CleanUp(IActorRef owner, IMessageQueue deadletters)
+        {
+            Envelope msg;
+            while (TryDequeue(out msg))
+            {
+                deadletters.Enqueue(owner, msg);
+            }
         }
 
         /// <summary>

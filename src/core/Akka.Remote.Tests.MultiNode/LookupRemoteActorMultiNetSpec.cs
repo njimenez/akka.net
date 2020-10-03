@@ -1,23 +1,28 @@
-﻿namespace Akka.Remote.Tests.MultiNode
+﻿//-----------------------------------------------------------------------
+// <copyright file="LookupRemoteActorMultiNetSpec.cs" company="Akka.NET Project">
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
+// </copyright>
+//-----------------------------------------------------------------------
+
+using System;
+using Akka.Actor;
+using Akka.Remote.TestKit;
+using Xunit;
+
+namespace Akka.Remote.Tests.MultiNode
 {
-    using System;
-
-    using Akka.Actor;
-    using Akka.Remote.TestKit;
-
-    using Xunit;
-
     public class LookupRemoteActorMultiNetSpec : MultiNodeConfig
     {
-        public RoleName Master { get; private set; }
-        public RoleName Slave { get; private set; }
+        public RoleName Master { get; }
+        public RoleName Slave { get; }
 
         public LookupRemoteActorMultiNetSpec()
         {
-            CommonConfig = DebugConfig(false);
-
             Master = Role("master");
             Slave = Role("slave");
+
+            CommonConfig = DebugConfig(false);
         }
 
         public class SomeActor : UntypedActor
@@ -32,13 +37,6 @@
         }
     }
 
-    public class LookupRemoteActorMultiNetNode1 : LookupRemoteActorSpec
-    {
-    }
-    public class LookupRemoteActorMultiNetNode2 : LookupRemoteActorSpec
-    {
-    }
-
     public class LookupRemoteActorSpec : MultiNodeSpec
     {
         private LookupRemoteActorMultiNetSpec _config;
@@ -48,8 +46,8 @@
         {
 
         }
-        public LookupRemoteActorSpec(LookupRemoteActorMultiNetSpec config)
-            : base(config)
+        protected LookupRemoteActorSpec(LookupRemoteActorMultiNetSpec config)
+            : base(config, typeof(LookupRemoteActorSpec))
         {
             _config = config;
         }
@@ -69,10 +67,10 @@
                 () => Sys.ActorOf<NewRemoteActorMultiNodeSpecConfig.SomeActor>("service-hello"),
                 _config.Master);
 
-            RemotingMustLookupRemoteActor();
+            Remoting_must_lookup_remote_actor();
         }
 
-        public void RemotingMustLookupRemoteActor()
+        public void Remoting_must_lookup_remote_actor()
         {
             RunOn(
                 () =>

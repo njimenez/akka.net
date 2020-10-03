@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="AtLeastOnceDeliverySpec.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -9,12 +9,15 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Akka.Actor;
+using Akka.Actor.Dsl;
 using Akka.Event;
 using Akka.TestKit;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Akka.Persistence.Tests
 {
+    [Collection(nameof(AtLeastOnceDeliverySpec))]
     public class AtLeastOnceDeliverySpec : PersistenceSpec
     {
 
@@ -24,31 +27,22 @@ namespace Akka.Persistence.Tests
         {
             private readonly IActorRef _testActor;
             private readonly string _name;
-            private readonly TimeSpan _redeliverInterval;
-            private readonly int _warn;
-            private readonly int _redeliveryBurstLimit;
             private readonly bool _isAsync;
             private readonly IDictionary<string, ActorPath> _destinations;
             private readonly ILoggingAdapter _log;
             private IActorRef _lastSnapshotAskedForBy;
 
             public Sender(IActorRef testActor, string name, TimeSpan redeliverInterval, int warn, int redeliveryBurstLimit, bool isAsync, IDictionary<string, ActorPath> destinations)
-                : base()
+                : base(new PersistenceSettings.AtLeastOnceDeliverySettings(redeliverInterval, redeliveryBurstLimit, warn, 100000))
             {
                 _testActor = testActor;
                 _name = name;
-                _redeliverInterval = redeliverInterval;
-                _warn = warn;
-                _redeliveryBurstLimit = redeliveryBurstLimit;
                 _isAsync = isAsync;
                 _destinations = destinations;
                 _log = Context.GetLogger();
             }
 
-            public override string PersistenceId { get { return _name; } }
-            public override TimeSpan RedeliverInterval { get { return _redeliverInterval; } }
-            public override int UnconfirmedDeliveryAttemptsToWarn { get { return _warn; } }
-            public override int RedeliveryBurstLimit { get { return _redeliveryBurstLimit; } }
+            public override string PersistenceId => _name;
 
             protected override bool ReceiveRecover(object message)
             {
@@ -83,6 +77,16 @@ namespace Akka.Persistence.Tests
                                 Sender.Tell(ReqAck.Instance);
                             });
                         }
+                    })
+                    .With<ReqSelection>(msg =>
+                    {
+                        var c = char.ToUpper(msg.Payload[0]);
+                        var destination = _destinations[c.ToString()];
+                        Persist(new AcceptedSelectionReq(msg.Payload, destination.ToString()), e =>
+                        {
+                            UpdateState(e);
+                            Sender.Tell(ReqAck.Instance);
+                        });
                     })
                     .With<ActionAck>(ack =>
                     {
@@ -125,6 +129,11 @@ namespace Akka.Persistence.Tests
                     {
                         _log.Debug("Deliver(destination, deliveryId => Action(deliveryId, {0})), recovering: {1}", a.Payload, IsRecovering);
                         Deliver(ActorPath.Parse(a.DestinationPath), deliveryId => new Action(deliveryId, a.Payload));
+                    })
+                    .With<AcceptedSelectionReq>(a =>
+                    {
+                        _log.Debug("Deliver(destination, deliveryId => Action(deliveryId, {0})), recovering: {1}", a.Payload, IsRecovering);
+                        Deliver(Context.System.ActorSelection(a.DestinationPath), deliveryId => new Action(deliveryId, a.Payload));
                     })
                     .With<ReqDone>(r =>
                     {
@@ -180,7 +189,18 @@ namespace Akka.Persistence.Tests
 
             public string Payload { get; private set; }
         }
+        
+        [Serializable]
+        private class ReqSelection
+        {
+            public ReqSelection(string message)
+            {
+                Payload = message;
+            }
 
+            public string Payload { get; private set; }
+        }
+        
         [Serializable]
         sealed class ReqAck
         {
@@ -209,6 +229,21 @@ namespace Akka.Persistence.Tests
         sealed class AcceptedReq : IEvt
         {
             public AcceptedReq(string payload, string destinationPath)
+            {
+                Payload = payload;
+                DestinationPath = destinationPath;
+            }
+
+            public string Payload { get; private set; }
+
+            //FIXME: change to Akka.Actor.ActorPath when serialization problems will be solved
+            public string DestinationPath { get; private set; }
+        }
+        
+        [Serializable]
+        sealed class AcceptedSelectionReq : IEvt
+        {
+            public AcceptedSelectionReq(string payload, string destinationPath)
             {
                 Payload = payload;
                 DestinationPath = destinationPath;
@@ -298,11 +333,42 @@ namespace Akka.Persistence.Tests
 
             public AtLeastOnceDeliverySnapshot DeliverySnapshot { get; private set; }
         }
+        
+        private class DeliverToStarSelection : AtLeastOnceDeliveryActor
+        {
+            private readonly string _name;
+
+            public DeliverToStarSelection(string name)
+            {
+                _name = name;
+            }
+
+            protected override bool ReceiveCommand(object message)
+            {
+                // this is not supported currently, so expecting exception
+                try
+                {
+                    Deliver(Context.ActorSelection("*"), id => string.Format("{0}{1}", message, id));
+                }
+                catch (Exception ex)
+                {
+                    Sender.Tell(ex.Message);
+                }
+                return true;
+            }
+
+            protected override bool ReceiveRecover(object message)
+            {
+                return true;
+            }
+
+            public override string PersistenceId => _name;
+        }
 
         #endregion
 
-        public AtLeastOnceDeliverySpec()
-            : base(PersistenceSpec.Configuration("inmem", "AtLeastOnceDeliverySpec"))
+        public AtLeastOnceDeliverySpec(ITestOutputHelper output)
+            : base(Configuration("AtLeastOnceDeliverySpec"), output)
         {
         }
 
@@ -317,6 +383,25 @@ namespace Akka.Persistence.Tests
             ExpectMsg(ReqAck.Instance);
             probe.ExpectMsg<Action>(a => a.Id == 1 && a.Payload == "a");
             probe.ExpectNoMsg(TimeSpan.FromSeconds(1));
+        }
+
+        [Fact]
+        public void PersistentReceive_must_not_allow_using_ActorSelection_with_wildcards()
+        {
+            Sys.ActorOf(Props.Create(() => new DeliverToStarSelection(Name))).Tell("anything, really.");
+            ExpectMsg<string>().Contains("not supported").ShouldBeTrue();
+        }
+
+        [Fact]
+        public void AtLeastOnceDelivery_must_allow_using_ActorSelection_without_wildcards()
+        {
+            var probe = CreateTestProbe();
+            var destinations = new Dictionary<string, ActorPath> { { "A", Sys.ActorOf(Props.Create(() => new Destination(probe.Ref))).Path } };
+            var sender = Sys.ActorOf(Props.Create(() => new Sender(TestActor, Name, TimeSpan.FromMilliseconds(500), 5, 1000, false, destinations)), Name);
+
+            var mess = new ReqSelection("a-1");
+            sender.Tell(mess);
+            probe.ExpectMsg<Action>(a => a.Id == 1 && a.Payload == "a-1");
         }
 
         [Fact]
@@ -380,7 +465,7 @@ namespace Akka.Persistence.Tests
             probe.ExpectNoMsg(TimeSpan.FromSeconds(1));
         }
 
-        [Fact]
+        [Fact(Skip = "Racy")]
         public void AtLeastOnceDelivery_must_resend_replayed_deliveries_with_an_initially_in_order_strategy_before_delivering_fresh_messages()
         {
             var probe = CreateTestProbe();
@@ -486,7 +571,7 @@ namespace Akka.Persistence.Tests
             Sys.Stop(sender);
         }
 
-        [Fact(Skip = "FIXME")]
+        [Fact]
         public void AtLeastOnceDelivery_must_redeliver_many_lost_messages()
         {
             var probeA = CreateTestProbe();
@@ -526,13 +611,58 @@ namespace Akka.Persistence.Tests
                 sender.Tell(new Req(x));
             }
             var deliverWithin = TimeSpan.FromSeconds(20);
-            var resA = new SortedSet<string>(probeA.ReceiveN(n, deliverWithin).Cast<Action>().Select(x => x.Payload));
-            var resB = new SortedSet<string>(probeB.ReceiveN(n, deliverWithin).Cast<Action>().Select(x => x.Payload));
-            var resC = new SortedSet<string>(probeC.ReceiveN(n, deliverWithin).Cast<Action>().Select(x => x.Payload));
 
-            resA.ShouldOnlyContainInOrder(a);
-            resB.ShouldOnlyContainInOrder(b);
-            resC.ShouldOnlyContainInOrder(c);
+            var resAarr = probeA.ReceiveN(n, deliverWithin).Cast<Action>().Select(x => x.Payload).ToArray();
+            var resBarr = probeB.ReceiveN(n, deliverWithin).Cast<Action>().Select(x => x.Payload).ToArray();
+            var resCarr = probeC.ReceiveN(n, deliverWithin).Cast<Action>().Select(x => x.Payload).ToArray();
+
+            resAarr.Except(a).Any().ShouldBeFalse();
+            resBarr.Except(b).Any().ShouldBeFalse();
+            resCarr.Except(c).Any().ShouldBeFalse();
+        }
+
+        [Fact(Skip = "Racy on Azure DevOps")]
+        public void AtLeastOnceDelivery_must_limit_the_number_of_messages_redelivered_at_once()
+        {
+            var probe = CreateTestProbe();
+            var probeA = CreateTestProbe();
+            var dst = Sys.ActorOf(Props.Create(() => new Destination(probeA.Ref)));
+
+            var destinations = new Dictionary<string, ActorPath>
+            {
+                {"A", Sys.ActorOf(Props.Create(() => new Unreliable(2, dst))).Path}
+            };
+
+            var sender =
+                Sys.ActorOf(
+                    Props.Create(
+                        () =>
+                            new Sender(probe.Ref, Name, TimeSpan.FromMilliseconds(1000), 5, 2, true, destinations)),
+                    Name);
+
+            const int N = 10;
+            for (int i = 1; i <= N; i++)
+            {
+                sender.Tell(new Req("a-" + i),  probe.Ref);
+            }
+
+            // initially all odd messages should go through
+            for (int i = 1; i <= N; i = i+2)
+            {
+                probeA.ExpectMsg<Action>(a => a.Id == i && a.Payload == "a-" + i);
+            }
+            probeA.ExpectNoMsg(TimeSpan.FromMilliseconds(100));
+
+            // at each redelivery round, 2 (even) messages are sent, the first goes through
+            // without throttling, at each round half of the messages would go through
+            var toDeliver = Enumerable.Range(1, N).Where(i => i%2 == 0).Select(i => (long)i).ToList();
+            for (int i = 2; i <= N; i = i+2)
+            {
+                toDeliver.Remove(probeA.ExpectMsg<Action>().Id);
+                probeA.ExpectNoMsg(TimeSpan.FromMilliseconds(100));
+            }
+
+            toDeliver.Count.ShouldBe(0);
         }
     }
 }

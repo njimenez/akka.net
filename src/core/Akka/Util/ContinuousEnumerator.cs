@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="ContinuousEnumerator.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -15,24 +15,27 @@ namespace Akka.Util
     /// 
     /// This allows for continuous read-only iteration over a set.
     /// </summary>
-    /// <typeparam name="T"></typeparam>
+    /// <typeparam name="T">The type of objects to enumerate</typeparam>
     internal sealed class ContinuousEnumerator<T> : IEnumerator<T>
     {
-        /// <summary>
-        /// The raw iterator from some <see cref="IEnumerable{T}"/> object
-        /// </summary>
         private readonly IEnumerator<T> _internalEnumerator;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ContinuousEnumerator{T}"/> class.
+        /// </summary>
+        /// <param name="internalEnumerator">The raw iterator from some <see cref="IEnumerable{T}"/> object</param>
         public ContinuousEnumerator(IEnumerator<T> internalEnumerator)
         {
             _internalEnumerator = internalEnumerator;
         }
 
+        /// <inheritdoc/>
         public void Dispose()
         {
             _internalEnumerator.Dispose();
         }
 
+        /// <inheritdoc/>
         public bool MoveNext()
         {
             if (!_internalEnumerator.MoveNext())
@@ -43,11 +46,13 @@ namespace Akka.Util
             return true;
         }
 
+        /// <inheritdoc/>
         public void Reset()
         {
             _internalEnumerator.Reset();
         }
 
+        /// <inheritdoc/>
         public T Current { get { return _internalEnumerator.Current; } }
 
         object IEnumerator.Current
@@ -63,10 +68,12 @@ namespace Akka.Util
     internal static class ContinuousEnumeratorExtensions
     {
         /// <summary>
-        /// Provides a <see cref="ContinuousEnumerator{T}"/> instance for <see cref="collection"/>.
+        /// Provides a <see cref="ContinuousEnumerator{T}"/> instance for <paramref name="collection"/>.
         /// 
-        /// Internally, it just wraps <see cref="collection"/>'s internal iterator with circular iteration behavior.
+        /// Internally, it just wraps <paramref name="collection"/>'s internal iterator with circular iteration behavior.
         /// </summary>
+        /// <param name="collection">TBD</param>
+        /// <returns>TBD</returns>
         public static ContinuousEnumerator<T> GetContinuousEnumerator<T>(this IEnumerable<T> collection)
         {
             return new ContinuousEnumerator<T>(collection.GetEnumerator());

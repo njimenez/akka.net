@@ -1,4 +1,11 @@
-﻿using System;
+﻿//-----------------------------------------------------------------------
+// <copyright file="PiercingShouldKeepQuarantineSpec.cs" company="Akka.NET Project">
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
+// </copyright>
+//-----------------------------------------------------------------------
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,8 +19,8 @@ namespace Akka.Remote.Tests.MultiNode
 {
     public class PiercingShouldKeepQuarantineMultiNodeConfig : MultiNodeConfig
     {
-        public RoleName First { get; private set; }
-        public RoleName Second { get; private set; }
+        public RoleName First { get; }
+        public RoleName Second { get; }
 
         public PiercingShouldKeepQuarantineMultiNodeConfig()
         {
@@ -29,23 +36,15 @@ namespace Akka.Remote.Tests.MultiNode
         }
     }
 
-    public class PiercingShouldKeepQuarantineMultiNode1 : PiercingShouldKeepQuarantineSpec
-    {
-    }
-
-    public class PiercingShouldKeepQuarantineMultiNode2 : PiercingShouldKeepQuarantineSpec
-    {
-    }
-
-    public abstract class PiercingShouldKeepQuarantineSpec : MultiNodeSpec
+    public class PiercingShouldKeepQuarantineSpec : MultiNodeSpec
     {
         private readonly PiercingShouldKeepQuarantineMultiNodeConfig _config;
 
-        protected PiercingShouldKeepQuarantineSpec() : this(new PiercingShouldKeepQuarantineMultiNodeConfig())
+        public PiercingShouldKeepQuarantineSpec() : this(new PiercingShouldKeepQuarantineMultiNodeConfig())
         {
         }
 
-        protected PiercingShouldKeepQuarantineSpec(PiercingShouldKeepQuarantineMultiNodeConfig config) : base(config)
+        protected PiercingShouldKeepQuarantineSpec(PiercingShouldKeepQuarantineMultiNodeConfig config) : base(config, typeof(PiercingShouldKeepQuarantineSpec))
         {
             _config = config;
         }
@@ -67,10 +66,10 @@ namespace Akka.Remote.Tests.MultiNode
         [MultiNodeFact]
         public void PiercingShouldKeepQuarantineSpecs()
         {
-            WhileProbingThroughTheQuarantineRemotingMustNotLoseExistingQuarantineMarker();
+            While_probing_through_the_quarantine_remoting_must_not_lose_existing_quarantine_marker();
         }
 
-        public void WhileProbingThroughTheQuarantineRemotingMustNotLoseExistingQuarantineMarker()
+        public void While_probing_through_the_quarantine_remoting_must_not_lose_existing_quarantine_marker()
         {
             RunOn(() =>
             {
@@ -84,7 +83,7 @@ namespace Akka.Remote.Tests.MultiNode
                 // Manually Quarantine the other system
                 RARP.For(Sys).Provider.Transport.Quarantine(Node(_config.Second).Address, uid);
 
-                // Quarantining is not immedeiate
+                // Quarantining is not immediate
                 Thread.Sleep(1000);
 
                 // Quarantine is up - Should not be able to communicate with remote system any more

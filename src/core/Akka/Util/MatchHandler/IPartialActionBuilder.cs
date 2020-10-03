@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="IPartialActionBuilder.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -9,10 +9,13 @@ using System;
 
 namespace Akka.Tools.MatchHandler
 {
-    public interface IPartialActionBuilder
+    /// <summary>
+    /// TBD
+    /// </summary>
+    internal interface IPartialActionBuilder
     {
         /// <summary>
-        /// Builds the specified delegate and arguments to a <see cref="PartialAction{T}">PartialAction&lt;<typeparamref name="T"/>&gt;</see>
+        /// Builds the specified delegate and arguments to a <see cref="PartialAction{T}"/>
         /// <para>If the number of arguments are 0, the delegate should be a <see cref="Func{T}">Func&lt;<typeparamref name="T"/>,bool&gt;</see></para>
         /// <para>If the number of arguments are 1, the delegate should be a <see cref="Func{T,T1}">Func&lt;<typeparamref name="T"/>,T1,bool&gt;</see></para>
         /// <para>...</para>

@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="FsApi.fs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -18,7 +18,7 @@ type PersistenceId = string
 type Snapshotter<'State> =
     abstract LoadSnapshot: PersistenceId -> SnapshotSelectionCriteria -> int64 -> unit
     abstract SaveSnapshot: 'State -> unit
-    abstract DeleteSnapshot: int64 -> DateTime -> unit
+    abstract DeleteSnapshot: int64 -> unit
     abstract DeleteSnapshots: SnapshotSelectionCriteria -> unit
 
 [<Interface>]
@@ -75,6 +75,11 @@ type Eventsourced<'Command, 'Event, 'State> =
     /// event will be confirmed.
     /// </summary>
     abstract DeferEvent: ('Event -> 'State) -> 'Event seq -> unit
+    
+    /// <summary>
+    /// Defers a callback function to be called after persisting events will be confirmed.
+    /// </summary>
+    abstract DeferAsync: (obj -> unit) -> obj -> unit
 
     /// <summary>
     /// Returns currently attached journal actor reference.
@@ -87,7 +92,7 @@ type Eventsourced<'Command, 'Event, 'State> =
     abstract SnapshotStore: unit -> IActorRef
     
     /// <summary>
-    /// Returns value determining if current persistent actor is actually recovering.
+    /// Returns value determining if current persistent view is actually recovering.
     /// </summary>
     abstract IsRecovering: unit -> bool
     
@@ -127,12 +132,14 @@ type FunPersistentActor<'Command, 'Event, 'State>(aggregate: Aggregate<'Command,
             member __.ActorSelection(path : string) = context.ActorSelection(path)
             member __.ActorSelection(path : ActorPath) = context.ActorSelection(path)
             member __.Watch(aref:IActorRef) = context.Watch aref
+            member __.WatchWith(aref:IActorRef, msg) = context.WatchWith (aref, msg)
             member __.Unwatch(aref:IActorRef) = context.Unwatch aref
             member __.Log = lazy (Akka.Event.Logging.GetLogger(context)) 
             member __.Defer fn = deferables <- fn::deferables
-            member __.DeferEvent callback events = this.Defer(events, Action<_>(updateState callback))
-            member __.PersistEvent callback events = this.Persist(events, Action<_>(updateState callback))
-            member __.AsyncPersistEvent callback events = this.PersistAsync(events, Action<_>(updateState callback)) 
+            member __.DeferEvent callback events = events |> Seq.iter (fun e -> this.DeferAsync(e, Action<_>(updateState callback)))
+            member __.DeferAsync callback obj = this.DeferAsync(obj, Action<_>(callback))
+            member __.PersistEvent callback events = this.PersistAll(events, Action<_>(updateState callback))
+            member __.AsyncPersistEvent callback events = this.PersistAllAsync(events, Action<_>(updateState callback)) 
             member __.Journal() = this.Journal
             member __.SnapshotStore() = this.SnapshotStore
             member __.PersistenceId() = this.PersistenceId
@@ -140,7 +147,7 @@ type FunPersistentActor<'Command, 'Event, 'State>(aggregate: Aggregate<'Command,
             member __.LastSequenceNr() = this.LastSequenceNr
             member __.LoadSnapshot pid criteria seqNr = this.LoadSnapshot(pid, criteria, seqNr)
             member __.SaveSnapshot state = this.SaveSnapshot(state)
-            member __.DeleteSnapshot seqNr timestamp = this.DeleteSnapshot(seqNr, timestamp)
+            member __.DeleteSnapshot seqNr = this.DeleteSnapshot(seqNr)
             member __.DeleteSnapshots criteria = this.DeleteSnapshots(criteria) }
             
     member __.Sender() : IActorRef = base.Sender
@@ -149,18 +156,22 @@ type FunPersistentActor<'Command, 'Event, 'State>(aggregate: Aggregate<'Command,
         match msg with
         | :? 'Command as cmd -> aggregate.exec mailbox state cmd
         | _ -> 
-            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<obj> :?> Akka.Serialization.NewtonSoftJsonSerializer
-            match Serialization.tryDeserializeJObject serializer.Serializer msg with
-            | Some(cmd) -> aggregate.exec mailbox state cmd
-            | None -> x.Unhandled msg
+            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<'Command>
+            match msg with
+            | :? (byte[]) as bytes -> 
+                let cmd = serializer.FromBinary(bytes, typeof<'Command>) :?> 'Command
+                aggregate.exec mailbox state cmd
+            | _ -> x.Unhandled msg
     override x.OnRecover (msg: obj) = 
         match msg with
         | :? 'Event as e -> state <- aggregate.apply mailbox state e
         | _ -> 
-            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<obj> :?> Akka.Serialization.NewtonSoftJsonSerializer
-            match Serialization.tryDeserializeJObject serializer.Serializer msg with
-            | Some(e) -> state <- aggregate.apply mailbox state e
-            | None -> x.Unhandled msg
+            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<'Event>
+            match msg with
+            | :? (byte[]) as bytes -> 
+                let e = serializer.FromBinary(bytes, typeof<'Event>) :?> 'Event
+                state <- aggregate.apply mailbox state e
+            | _ -> x.Unhandled msg
     override x.PostStop () =
         base.PostStop ()
         List.iter (fun fn -> fn()) deferables
@@ -225,6 +236,11 @@ type View<'Event, 'State> =
     abstract PersistenceId: unit -> PersistenceId
     
     /// <summary>
+    /// Returns value determining if current persistent actor is actually recovering.
+    /// </summary>
+    abstract IsRecovering: unit -> bool
+
+    /// <summary>
     /// View's identifier that doesn't change across different view incarnations.
     /// </summary>
     abstract ViewId: unit -> PersistenceId
@@ -233,59 +249,6 @@ type Perspective<'Event, 'State> = {
     state: 'State
     apply: View<'Event, 'State> -> 'State -> 'Event -> 'State
 }
-
-type FunPersistentView<'Event, 'State>(perspective: Perspective<'Event, 'State>, name: PersistenceId, viewId: PersistenceId) as this =
-    inherit PersistentView()
-
-    let mutable deferables = []
-    let mutable state: 'State = perspective.state
-    let mailbox = 
-        let self' = this.Self
-        let context = PersistentView.Context :> IActorContext
-        let updateState (updater: 'Event -> 'State) e : unit = 
-            state <- updater e
-            ()
-        { new View<'Event, 'State> with
-            member __.Self = self'
-            member __.Context = context
-            member __.Sender() = this.Sender()
-            member __.Unhandled msg = this.Unhandled msg
-            member __.ActorOf(props, name) = context.ActorOf(props, name)
-            member __.ActorSelection(path : string) = context.ActorSelection(path)
-            member __.ActorSelection(path : ActorPath) = context.ActorSelection(path)
-            member __.Watch(aref:IActorRef) = context.Watch aref
-            member __.Unwatch(aref:IActorRef) = context.Unwatch aref
-            member __.Log = lazy (Akka.Event.Logging.GetLogger(context)) 
-            member __.Defer fn = deferables <- fn::deferables
-            member __.Journal() = this.Journal
-            member __.SnapshotStore() = this.SnapshotStore
-            member __.PersistenceId() = this.PersistenceId
-            member __.ViewId() = this.ViewId
-            member __.LastSequenceNr() = this.LastSequenceNr
-            member __.LoadSnapshot pid criteria seqNr = this.LoadSnapshot(pid, criteria, seqNr)
-            member __.SaveSnapshot state = this.SaveSnapshot(state)
-            member __.DeleteSnapshot seqNr timestamp = this.DeleteSnapshot(seqNr, timestamp)
-            member __.DeleteSnapshots criteria = this.DeleteSnapshots(criteria) }
-      
-    member __.Sender() : IActorRef = base.Sender
-    member __.Unhandled msg = base.Unhandled msg
-    override x.Receive (msg: obj): bool = 
-        match msg with
-        | :? 'Event as e -> 
-            state <- perspective.apply mailbox state e
-            true            
-        | _ -> 
-            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<obj> :?> Akka.Serialization.NewtonSoftJsonSerializer
-            match Serialization.tryDeserializeJObject serializer.Serializer msg with
-            | Some(e) -> 
-                state <- perspective.apply mailbox state e
-                true
-            | None -> false     
-    override x.PostStop () =
-        base.PostStop ()
-        List.iter (fun fn -> fn()) deferables
-    default x.PersistenceId = name
-    default x.ViewId = viewId
 
 [<Interface>]
 type Delivery<'Command, 'Event, 'State> =
@@ -323,12 +286,14 @@ type Deliverer<'Command, 'Event, 'State>(aggregate: DeliveryAggregate<'Command, 
             member __.ActorSelection(path : string) = context.ActorSelection(path)
             member __.ActorSelection(path : ActorPath) = context.ActorSelection(path)
             member __.Watch(aref:IActorRef) = context.Watch aref
+            member __.WatchWith(aref:IActorRef, msg) = context.WatchWith (aref, msg)
             member __.Unwatch(aref:IActorRef) = context.Unwatch aref
             member __.Log = lazy (Akka.Event.Logging.GetLogger(context)) 
             member __.Defer fn = deferables <- fn::deferables
-            member __.DeferEvent callback events = this.Defer(events, Action<_>(updateState callback))
-            member __.PersistEvent callback events = this.Persist(events, Action<_>(updateState callback))
-            member __.AsyncPersistEvent callback events = this.PersistAsync(events, Action<_>(updateState callback)) 
+            member __.DeferEvent callback events = events |> Seq.iter (fun e -> this.DeferAsync(e, Action<_>(updateState callback)))
+            member __.DeferAsync callback obj = this.DeferAsync(obj, Action<_>(callback))
+            member __.PersistEvent callback events = this.PersistAll(events, Action<_>(updateState callback))
+            member __.AsyncPersistEvent callback events = this.PersistAllAsync(events, Action<_>(updateState callback)) 
             member __.Journal() = this.Journal
             member __.SnapshotStore() = this.SnapshotStore
             member __.PersistenceId() = this.PersistenceId
@@ -336,7 +301,7 @@ type Deliverer<'Command, 'Event, 'State>(aggregate: DeliveryAggregate<'Command, 
             member __.LastSequenceNr() = this.LastSequenceNr
             member __.LoadSnapshot pid criteria seqNr = this.LoadSnapshot(pid, criteria, seqNr)
             member __.SaveSnapshot state = this.SaveSnapshot(state)
-            member __.DeleteSnapshot seqNr timestamp = this.DeleteSnapshot(seqNr, timestamp)
+            member __.DeleteSnapshot seqNr = this.DeleteSnapshot(seqNr)
             member __.DeleteSnapshots criteria = this.DeleteSnapshots(criteria)
             member __.Deliver mapper path = this.Deliver(path, System.Func<_,_>(mapper))
             member __.ConfirmDelivery id = this.ConfirmDelivery(id)
@@ -350,19 +315,23 @@ type Deliverer<'Command, 'Event, 'State>(aggregate: DeliveryAggregate<'Command, 
         match msg with
         | :? 'Command as cmd -> aggregate.exec mailbox state cmd
         | _ -> 
-            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<obj> :?> Akka.Serialization.NewtonSoftJsonSerializer
-            match Serialization.tryDeserializeJObject serializer.Serializer msg with
-            | Some(cmd) -> aggregate.exec mailbox state cmd
-            | None -> x.Unhandled msg
+            match msg with
+            | :? (byte[]) as bytes -> 
+                let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<'Command>
+                let cmd = serializer.FromBinary(bytes, typeof<'Command>) :?> 'Command
+                aggregate.exec mailbox state cmd
+            | _ -> x.Unhandled msg
         true
     override x.ReceiveRecover (msg: obj) = 
         match msg with
         | :? 'Event as e -> state <- aggregate.apply mailbox state e
         | _ -> 
-            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<obj> :?> Akka.Serialization.NewtonSoftJsonSerializer
-            match Serialization.tryDeserializeJObject serializer.Serializer msg with
-            | Some(e) -> state <- aggregate.apply mailbox state e
-            | None -> x.Unhandled msg
+            let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<'Event>
+            match msg with
+            | :? (byte[]) as bytes -> 
+                let e = serializer.FromBinary(bytes, typeof<'Event>) :?> 'Event
+                state <- aggregate.apply mailbox state e
+            | _ -> x.Unhandled msg
         true
     override x.PostStop () =
         base.PostStop ()
@@ -387,12 +356,6 @@ module Linq =
             | Lambda(_, Invoke(Call(null, Method "ToFSharpFunc", Ar [| Lambda(_, p) |]))) -> 
                 Expression.Lambda(p, [||]) :?> System.Linq.Expressions.Expression<System.Func<Deliverer<'Command, 'Event, 'State>>>
             | _ -> failwith "Doesn't match"
-
-        static member ToExpression(f : System.Linq.Expressions.Expression<System.Func<FunPersistentView<'Event, 'State>>>) = 
-            match f with
-            | Lambda(_, Invoke(Call(null, Method "ToFSharpFunc", Ar [| Lambda(_, p) |]))) -> 
-                Expression.Lambda(p, [||]) :?> System.Linq.Expressions.Expression<System.Func<FunPersistentView<'Event, 'State>>>
-            | _ -> failwith "Doesn't match"
      
 /// <summary>
 /// Spawns a persistent actor instance.
@@ -405,20 +368,7 @@ let spawnPersist (actorFactory : IActorRefFactory) (name : PersistenceId) (aggre
     let e = Linq.PersistentExpression.ToExpression(fun () -> new FunPersistentActor<'Command, 'Event, 'State>(aggregate, name))
     let props = applySpawnOptions (Props.Create e) options
     actorFactory.ActorOf(props, name)
-    
-/// <summary>
-/// Spawns a persistent view instance. Unlike actor's views are readonly versions of statefull, recoverable actors.
-/// </summary>
-/// <param name="actorFactory">Object responsible for actor instantiation.</param>
-/// <param name="name">Identifies uniquely current actor across different incarnations. It's necessary to identify it's event source.</param>
-/// <param name="viewName">Identifies uniquely current view's state. It's different that event source, since many views with different internal states can relate to single event source.</param>
-/// <param name="aggregate">Aggregate containing state of the actor, but also an command-handling behavior.</param>
-/// <param name="options">Additional spawning options.</param>
-let spawnView (actorFactory : IActorRefFactory) (viewName: PersistenceId) (name : PersistenceId)  (perspective: Perspective<'Event, 'State>) (options : SpawnOption list) : IActorRef =
-    let e = Linq.PersistentExpression.ToExpression(fun () -> new FunPersistentView<'Event, 'State>(perspective, name, viewName))
-    let props = applySpawnOptions (Props.Create e) options
-    actorFactory.ActorOf(props, viewName)
-    
+        
 /// <summary>
 /// Spawns a guaranteed delivery actor. This actor can deliver messages using at-least-once delivery semantics.
 /// </summary>

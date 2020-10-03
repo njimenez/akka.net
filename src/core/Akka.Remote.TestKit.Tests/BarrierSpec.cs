@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="BarrierSpec.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -84,7 +84,7 @@ namespace Akka.Remote.TestKit.Tests
         private readonly RoleName C = new RoleName("c");
 
         [Fact]
-        public void ABarrierCoordinatorMustRegisterClientsAndRemoveThem()
+        public void A_BarrierCoordinator_must_register_clients_and_remove_them()
         {
             var b = GetBarrier();
             b.Tell(new Controller.NodeInfo(A, Address.Parse("akka://sys"), Sys.DeadLetters), TestActor);
@@ -93,13 +93,13 @@ namespace Akka.Remote.TestKit.Tests
             //EventFilter<BarrierCoordinator.BarrierEmpty>(1, () => b.Tell(new BarrierCoordinator.RemoveClient(A), TestActor)); //appears to be a bug in the testfilter
             b.Tell(new BarrierCoordinator.RemoveClient(A));
             ExpectMsg(new Failed(b,
-                new BarrierCoordinator.BarrierEmpty(
+                new BarrierCoordinator.BarrierEmptyException(
                     new BarrierCoordinator.Data(ImmutableHashSet.Create<Controller.NodeInfo>(), "", null, null),
                     "cannot remove RoleName(a): no client to remove")));
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustRegisterClientsAndDisconnectThem()
+        public void A_BarrierCoordinator_must_register_clients_and_disconnect_them()
         {
             var b = GetBarrier();
             b.Tell(new Controller.NodeInfo(A, Address.Parse("akka://sys"), Sys.DeadLetters));
@@ -110,7 +110,7 @@ namespace Akka.Remote.TestKit.Tests
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustFailEnteringBarrierWhenNobodyRegistered()
+        public void A_BarrierCoordinator_must_fail_entering_barrier_when_nobody_registered()
         {
             var b = GetBarrier();
             b.Tell(new EnterBarrier("bar1", null), TestActor);
@@ -118,7 +118,7 @@ namespace Akka.Remote.TestKit.Tests
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustEnterBarrier()
+        public void A_BarrierCoordinator_must_enter_barrier()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -136,7 +136,7 @@ namespace Akka.Remote.TestKit.Tests
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustEnterBarrierWithJoiningNode()
+        public void A_BarrierCoordinator_must_enter_barrier_with_joining_node()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -158,7 +158,7 @@ namespace Akka.Remote.TestKit.Tests
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustEnterBarrierWithLeavingNode()
+        public void A_BarrierCoordinator_must_enter_barrier_with_leaving_node()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -182,7 +182,7 @@ namespace Akka.Remote.TestKit.Tests
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustEnterLeaveBarrierWhenLastArrivedIsRemoved()
+        public void A_BarrierCoordinator_must_enter_leave_barrier_when_last_arrived_is_removed()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -196,7 +196,7 @@ namespace Akka.Remote.TestKit.Tests
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustFailBarrierWithDisconnectingNode()
+        public void A_BarrierCoordinator_must_fail_barrier_with_disconnecting_node()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -208,17 +208,17 @@ namespace Akka.Remote.TestKit.Tests
             //TODO: EventFilter?
             barrier.Tell(new Controller.ClientDisconnected(B));
             var msg = ExpectMsg<Failed>();
-            Assert.Equal(new BarrierCoordinator.ClientLost(
+            Assert.Equal(new BarrierCoordinator.ClientLostException(
                 new BarrierCoordinator.Data(
                     ImmutableHashSet.Create(nodeA),
                     "bar6", 
                     ImmutableHashSet.Create(a.Ref),
-                    ((BarrierCoordinator.ClientLost) msg.Exception).BarrierData.Deadline)
+                    ((BarrierCoordinator.ClientLostException) msg.Exception).BarrierData.Deadline)
                 , B), msg.Exception);
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustFailBarrierWhenDisconnectingNodeWhoAlreadyArrived()
+        public void A_BarrierCoordinator_must_fail_barrier_when_disconnecting_node_who_already_arrived()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -234,18 +234,18 @@ namespace Akka.Remote.TestKit.Tests
             //TODO: Event filter?
             barrier.Tell(new Controller.ClientDisconnected(B));
             var msg = ExpectMsg<Failed>();
-            Assert.Equal(new BarrierCoordinator.ClientLost(
+            Assert.Equal(new BarrierCoordinator.ClientLostException(
                 new BarrierCoordinator.Data(
                     ImmutableHashSet.Create(nodeA, nodeC),
                     "bar7", 
                     ImmutableHashSet.Create(a.Ref),
-                    ((BarrierCoordinator.ClientLost)msg.Exception).BarrierData.Deadline)
+                    ((BarrierCoordinator.ClientLostException)msg.Exception).BarrierData.Deadline)
                 , B), msg.Exception);
 
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustFailWhenEnteringWrongBarrier()
+        public void A_BarrierCoordinator_must_fail_when_entering_wrong_barrier()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -258,31 +258,31 @@ namespace Akka.Remote.TestKit.Tests
             //TODO: Event filter
             b.Send(barrier, new EnterBarrier("foo", null));
             var msg = ExpectMsg<Failed>();
-            Assert.Equal(new BarrierCoordinator.WrongBarrier(
+            Assert.Equal(new BarrierCoordinator.WrongBarrierException(
                 "foo",
                 b.Ref,
                 new BarrierCoordinator.Data(
                     ImmutableHashSet.Create(nodeA, nodeB),
                     "bar8",
                     ImmutableHashSet.Create(a.Ref),
-                    ((BarrierCoordinator.WrongBarrier)msg.Exception).BarrierData.Deadline)
+                    ((BarrierCoordinator.WrongBarrierException)msg.Exception).BarrierData.Deadline)
                 ), msg.Exception);
         }
         
         [Fact]
-        public void ABarrierCoordinatorMustFailBarrierAfterFirstFailure()
+        public void A_BarrierCoordinator_must_fail_barrier_after_first_failure()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
             //TODO: EventFilter
             barrier.Tell(new BarrierCoordinator.RemoveClient(A));
             var msg = ExpectMsg<Failed>();
-            Assert.Equal(new BarrierCoordinator.BarrierEmpty(
+            Assert.Equal(new BarrierCoordinator.BarrierEmptyException(
                 new BarrierCoordinator.Data(
                     ImmutableHashSet.Create<Controller.NodeInfo>(),
                     "",
                     ImmutableHashSet.Create<IActorRef>(),
-                    ((BarrierCoordinator.BarrierEmpty)msg.Exception).BarrierData.Deadline)
+                    ((BarrierCoordinator.BarrierEmptyException)msg.Exception).BarrierData.Deadline)
                 , "cannot remove RoleName(a): no client to remove"), msg.Exception);
             barrier.Tell(new Controller.NodeInfo(A, Address.Parse("akka://sys"), a.Ref));
             a.Send(barrier, new EnterBarrier("bar9", null));
@@ -290,7 +290,7 @@ namespace Akka.Remote.TestKit.Tests
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustFailAfterBarrierTimeout()
+        public void A_BarrierCoordinator_must_fail_after_barrier_timeout()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -300,21 +300,21 @@ namespace Akka.Remote.TestKit.Tests
             barrier.Tell(nodeA);
             barrier.Tell(nodeB);
             a.Send(barrier, new EnterBarrier("bar10", null));
-            EventFilter.Exception<BarrierCoordinator.BarrierTimeout>().ExpectOne(() =>
+            EventFilter.Exception<BarrierCoordinator.BarrierTimeoutException>().ExpectOne(() =>
             {
                 var msg = ExpectMsg<Failed>(TimeSpan.FromSeconds(7));
-                Assert.Equal(new BarrierCoordinator.BarrierTimeout(
+                Assert.Equal(new BarrierCoordinator.BarrierTimeoutException(
                     new BarrierCoordinator.Data(
                         ImmutableHashSet.Create(nodeA, nodeB),
                         "bar10",
                         ImmutableHashSet.Create(a.Ref),
-                        ((BarrierCoordinator.BarrierTimeout)msg.Exception).BarrierData.Deadline)
+                        ((BarrierCoordinator.BarrierTimeoutException)msg.Exception).BarrierData.Deadline)
                     ), msg.Exception);
             });
         }
 
         [Fact]
-        public void ABarrierCoordinatorMustFailIfANodeRegistersTwice()
+        public void A_BarrierCoordinator_must_fail_if_a_node_registers_twice()
         {
             var barrier = GetBarrier();
             var a = CreateTestProbe();
@@ -325,12 +325,12 @@ namespace Akka.Remote.TestKit.Tests
             //TODO: Event filter
             barrier.Tell(nodeB);
             var msg = ExpectMsg<Failed>();
-            Assert.Equal(new BarrierCoordinator.DuplicateNode(
+            Assert.Equal(new BarrierCoordinator.DuplicateNodeException(
                 new BarrierCoordinator.Data(
                     ImmutableHashSet.Create(nodeA),
                     "",
                     ImmutableHashSet.Create<IActorRef>(),
-                    ((BarrierCoordinator.DuplicateNode)msg.Exception).BarrierData.Deadline)
+                    ((BarrierCoordinator.DuplicateNodeException)msg.Exception).BarrierData.Deadline)
                 , nodeB), msg.Exception);
         }
 

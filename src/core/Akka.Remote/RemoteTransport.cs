@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="RemoteTransport.cs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Runtime.Serialization;
 using System.Threading.Tasks;
 using Akka.Actor;
+using Akka.Annotations;
 using Akka.Event;
 
 namespace Akka.Remote
@@ -23,15 +24,28 @@ namespace Akka.Remote
     /// be available (i.e. fully initialized) by the time the first message is received or when the Start() method
     /// returns, whichever happens first.
     /// </summary>
+    [InternalApi]
     public abstract class RemoteTransport
     {
+        /// <summary>
+        /// TBD
+        /// </summary>
+        /// <param name="system">TBD</param>
+        /// <param name="provider">TBD</param>
         protected RemoteTransport(ExtendedActorSystem system, RemoteActorRefProvider provider)
         {
             System = system;
             Provider = provider;
         }
 
-        protected ExtendedActorSystem System { get; private set; }
+        /// <summary>
+        /// TBD
+        /// </summary>
+        public ExtendedActorSystem System { get; private set; }
+
+        /// <summary>
+        /// TBD
+        /// </summary>
         public RemoteActorRefProvider Provider { get; private set; }
 
         /// <summary>
@@ -49,6 +63,9 @@ namespace Akka.Remote
         /// When true, some functionality will be turned off for security purposes
         /// </summary>
         protected bool UseUntrustedMode { get; set; }
+        /// <summary>
+        /// TBD
+        /// </summary>
         public bool logRemoteLifeCycleEvents { get; protected set; }
 
         /// <summary>
@@ -68,8 +85,11 @@ namespace Akka.Remote
         public abstract Task Shutdown();
 
         /// <summary>
-        /// Sends the given message to the recipient, supplying <see cref="sender"/> if any.
+        /// Sends the given message to the recipient, supplying <paramref name="sender"/> if any.
         /// </summary>
+        /// <param name="message">TBD</param>
+        /// <param name="sender">TBD</param>
+        /// <param name="recipient">TBD</param>
         public abstract void Send(object message, IActorRef sender, RemoteActorRef recipient);
 
         /// <summary>
@@ -97,20 +117,32 @@ namespace Akka.Remote
     }
 
     /// <summary>
-    /// Represents a general failure within a <see cref="RemoteTransport"/>, such as
+    /// This exception is thrown when a general failure within a <see cref="RemoteTransport"/> occurs, such as
     /// the inability to start, wrong configuration, etc...
     /// </summary>
     public class RemoteTransportException : AkkaException
     {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RemoteTransportException"/> class.
+        /// </summary>
+        /// <param name="message">The message that describes the error.</param>
+        /// <param name="cause">The exception that is the cause of the current exception.</param>
         public RemoteTransportException(string message, Exception cause = null)
             : base(message, cause)
         {
         }
 
+#if SERIALIZATION
+        /// <summary>
+        /// Initializes a new instance of the <see cref="RemoteTransportException"/> class.
+        /// </summary>
+        /// <param name="info">The <see cref="SerializationInfo"/> that holds the serialized object data about the exception being thrown.</param>
+        /// <param name="context">The <see cref="StreamingContext"/> that contains contextual information about the source or destination.</param>
         protected RemoteTransportException(SerializationInfo info, StreamingContext context)
             : base(info, context)
         {
         }
+#endif
     }
 }
 

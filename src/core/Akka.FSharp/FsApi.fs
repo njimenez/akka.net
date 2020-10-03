@@ -1,7 +1,7 @@
 ﻿//-----------------------------------------------------------------------
 // <copyright file="FsApi.fs" company="Akka.NET Project">
-//     Copyright (C) 2009-2015 Typesafe Inc. <http://www.typesafe.com>
-//     Copyright (C) 2013-2015 Akka.NET project <https://github.com/akkadotnet/akka.net>
+//     Copyright (C) 2009-2020 Lightbend Inc. <http://www.lightbend.com>
+//     Copyright (C) 2013-2020 .NET Foundation <https://github.com/akkadotnet/akka.net>
 // </copyright>
 //-----------------------------------------------------------------------
 
@@ -10,10 +10,10 @@ namespace Akka.FSharp
 open Akka.Actor
 open System
 open Microsoft.FSharp.Quotations
-open Microsoft.FSharp.Linq.QuotationEvaluation
+open FSharp.Quotations.Evaluator
 
 module Serialization = 
-    open Nessos.FsPickler
+    open MBrace.FsPickler
     open Akka.Serialization
 
     let internal serializeToBinary (fsp:BinarySerializer) o = 
@@ -24,28 +24,12 @@ module Serialization =
     let internal deserializeFromBinary<'t> (fsp:BinarySerializer) (bytes: byte array) =
             use stream = new System.IO.MemoryStream(bytes)
             fsp.Deserialize<'t> stream
-            
-    let private jobjectType = Type.GetType("Newtonsoft.Json.Linq.JObject, Newtonsoft.Json") 
-    let private jsonSerlizerType = Type.GetType("Newtonsoft.Json.JsonSerializer, Newtonsoft.Json")
-    let private toObjectMethod = jobjectType.GetMethod("ToObject", [|typeof<System.Type>; jsonSerlizerType|])
-
-    let tryDeserializeJObject jsonSerializer o : 'Message option =
-        let t = typeof<'Message>
-        if o <> null && o.GetType().Equals jobjectType 
-        then 
-            try
-                let res = toObjectMethod.Invoke(o, [|t; jsonSerializer|]) 
-                Some (res :?> 'Message)
-            with
-            | _ -> None // type conversion failed (passed JSON is not of expected type)
-        else None
-
     
     // used for top level serialization
     type ExprSerializer(system) = 
         inherit Serializer(system)
-        let fsp = FsPickler.CreateBinary()
-        override __.Identifier = 9
+        let fsp = FsPickler.CreateBinarySerializer()
+        override __.Identifier = 99
         override __.IncludeManifest = true        
         override __.ToBinary(o) = serializeToBinary fsp o        
         override __.FromBinary(bytes, _) = deserializeFromBinary fsp bytes
@@ -53,7 +37,7 @@ module Serialization =
                         
     let internal exprSerializationSupport (system: ActorSystem) =
         let serializer = ExprSerializer(system :?> ExtendedActorSystem)
-        system.Serialization.AddSerializer(serializer)
+        system.Serialization.AddSerializer("Expr serializer", serializer)
         system.Serialization.AddSerializationMap(typeof<Expr>, serializer)
 
 [<AutoOpen>]
@@ -66,12 +50,13 @@ module Actors =
         | o ->
             let context = Akka.Actor.Internal.InternalCurrentActorCellKeeper.Current
             if context = null 
-            then failwith "Cannot cast JObject outside the actor system context "
+            then failwith "Cannot cast object outside the actor system context "
             else
-                let serializer = context.System.Serialization.FindSerializerForType typeof<'Message> :?> Akka.Serialization.NewtonSoftJsonSerializer
-                match Serialization.tryDeserializeJObject serializer.Serializer o with
-                | Some m -> m
-                | None -> raise (InvalidCastException("Tried to cast JObject to " + typeof<'Message>.ToString()))
+                match o with
+                | :? (byte[]) as bytes -> 
+                    let serializer = context.System.Serialization.FindSerializerForType typeof<'Message>
+                    serializer.FromBinary(bytes, typeof<'Message>) :?> 'Message
+                | _ -> raise (InvalidCastException("Tried to cast object to " + typeof<'Message>.ToString()))
 
     /// <summary>
     /// Unidirectional send operator. 
@@ -84,7 +69,7 @@ module Actors =
     /// tracked by actorRef and awaits for response send back from corresponding actor. 
     /// </summary>
     let (<?) (tell : #ICanTell) (msg : obj) : Async<'Message> = 
-        tell.Ask(msg).ContinueWith(Func<_,'Message>(tryCast), TaskContinuationOptions.AttachedToParent|||TaskContinuationOptions.ExecuteSynchronously)
+        tell.Ask(msg).ContinueWith(Func<_,'Message>(tryCast), TaskContinuationOptions.ExecuteSynchronously)
         |> Async.AwaitTask
 
     /// Pipes an output of asynchronous expression directly to the recipients mailbox.
@@ -292,6 +277,7 @@ module Actors =
                         member __.ActorSelection(path : string) = context.ActorSelection(path)
                         member __.ActorSelection(path : ActorPath) = context.ActorSelection(path)
                         member __.Watch(aref:IActorRef) = context.Watch aref
+                        member __.WatchWith(aref:IActorRef, msg) = context.WatchWith (aref, msg)
                         member __.Unwatch(aref:IActorRef) = context.Unwatch aref
                         member __.Log = lazy (Akka.Event.Logging.GetLogger(context))
                         member __.Defer fn = deferables <- fn::deferables 
@@ -299,7 +285,7 @@ module Actors =
                         member __.Unstash() = (this :> IWithUnboundedStash).Stash.Unstash()
                         member __.UnstashAll() = (this :> IWithUnboundedStash).Stash.UnstashAll() }
         
-        new(actor : Expr<Actor<'Message> -> Cont<'Message, 'Returned>>) = FunActor(actor.Compile () ())
+        new(actor : Expr<Actor<'Message> -> Cont<'Message, 'Returned>>) = FunActor(QuotationEvaluator.Evaluate actor)
         member __.Sender() : IActorRef = base.Sender
         member __.Unhandled msg = base.Unhandled msg
         override x.OnReceive msg = 
@@ -307,11 +293,7 @@ module Actors =
             | Func f -> 
                 match msg with
                 | :? 'Message as m -> state <- f m
-                | _ -> 
-                    let serializer = UntypedActor.Context.System.Serialization.FindSerializerForType typeof<obj> :?> Akka.Serialization.NewtonSoftJsonSerializer
-                    match Serialization.tryDeserializeJObject serializer.Serializer msg with
-                    | Some(m) -> state <- f m
-                    | None -> x.Unhandled msg
+                | _ -> x.Unhandled msg
             | Return _ -> x.PostStop()
         override x.PostStop() =
             base.PostStop ()
@@ -319,7 +301,7 @@ module Actors =
             
 
     /// Builds an actor message handler using an actor expression syntax.
-    let actor = ActorBuilder()                
+    let actor = ActorBuilder()    
     
 [<AutoOpen>]
 module Logging = 
@@ -392,14 +374,15 @@ module Linq =
 
     let toExpression<'Actor>(f : System.Linq.Expressions.Expression) = 
             match f with
-            | Lambda(_, Invoke(Call(null, Method "ToFSharpFunc", Ar [| Lambda(_, p) |]))) 
+            | Lambda(_, (Call(null, Method "ToFSharpFunc", Ar [| Lambda(_, p) |]))) 
             | Call(null, Method "ToFSharpFunc", Ar [| Lambda(_, p) |]) -> 
                 Expression.Lambda(p, [||]) :?> System.Linq.Expressions.Expression<System.Func<'Actor>>
             | _ -> failwith "Doesn't match"
  
     type Expression = 
-        static member ToExpression(f : System.Linq.Expressions.Expression<System.Func<FunActor<'Message, 'v>>>) = toExpression<FunActor<'Message, 'v>> f
-        static member ToExpression<'Actor>(f : Quotations.Expr<(unit -> 'Actor)>) = toExpression<'Actor> (QuotationEvaluator.ToLinqExpression f)  
+        static member ToExpression(f : System.Linq.Expressions.Expression<System.Func<FunActor<'Message, 'v>>>) = f
+        static member ToExpression<'Actor>(f : Quotations.Expr<(unit -> 'Actor)>) = 
+            toExpression<'Actor> (QuotationEvaluator.ToLinqExpression f)  
         
 [<RequireQualifiedAccess>]
 module Configuration = 
@@ -424,18 +407,18 @@ type ExprDeciderSurrogate(serializedExpr: byte array) =
     member __.SerializedExpr = serializedExpr
     interface ISurrogate with
         member this.FromSurrogate _ = 
-            let fsp = Nessos.FsPickler.FsPickler.CreateBinary()
+            let fsp = MBrace.FsPickler.FsPickler.CreateBinarySerializer()
             let expr = (Serialization.deserializeFromBinary<Expr<(exn->Directive)>> fsp (this.SerializedExpr))
             ExprDecider(expr) :> ISurrogated
 
 and ExprDecider (expr: Expr<(exn->Directive)>) =
     member __.Expr = expr
-    member private this.Compiled = lazy this.Expr.Compile()()
+    member private this.Compiled = lazy (QuotationEvaluator.Evaluate this.Expr)
     interface IDecider with
         member this.Decide (e: exn): Directive = this.Compiled.Value (e)
     interface ISurrogated with
         member this.ToSurrogate _ = 
-            let fsp = Nessos.FsPickler.FsPickler.CreateBinary()        
+            let fsp = MBrace.FsPickler.FsPickler.CreateBinarySerializer()        
             ExprDeciderSurrogate(Serialization.serializeToBinary fsp this.Expr) :> ISurrogate
         
 type Strategy = 
